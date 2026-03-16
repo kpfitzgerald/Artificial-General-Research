@@ -1,145 +1,74 @@
 # AGR: Artificial General Research
 
-> Autonomous iterative optimization for any measurable problem.
-> Powered by [Claude Code](https://claude.com/claude-code).
+**Autonomous code optimization that works while you sleep.** Define a metric, point it at your code, go to bed. Wake up to a faster, smaller, better system — with correctness verified at every step.
+
+**Real result:** [Spatialize](https://github.com/alges/spatialize) C++/Python library — **53.54s → 1.15s (45x speedup)**, 18 autonomous experiments, all checksums verified.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-v2.1.72+-blue)](https://claude.com/claude-code)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-blue)](https://claude.com/claude-code)
+[![Autonomous Optimization](https://img.shields.io/badge/Autonomous-Optimization-green)]()
+[![Fresh Context Per Iteration](https://img.shields.io/badge/Fresh%20Context-Per%20Iteration-orange)]()
 
-**AGR** is a Claude Code skill that turns any measurable optimization problem into an autonomous research loop. Define a metric, a correctness check, and what code to modify — AGR handles the rest: experiment, measure, keep or discard, repeat forever.
-
-You go to sleep. You wake up to a faster, smaller, better system.
-
----
-
-## Inspired By
-
-- **[Andrej Karpathy's autoresearch](https://github.com/karpathy/autoresearch)** — the original vision of autonomous AI research. 630 lines of Python, 100 experiments per night, compounding gains. Thank you Andrej for everything you do for open source and the AI community.
-- **[Udit Goenka's autoresearch](https://github.com/uditgoenka/autoresearch)** — generalized autoresearch beyond ML, introduced Metric/Guard separation.
-- **[Frank Bria's Ralph Loop](https://github.com/frankbria/ralph-claude-code)** — the stop-hook pattern for fresh context per iteration in Claude Code.
+> The only autoresearch framework with **built-in measurement integrity** — variance-aware acceptance, artifact detection, and exhausted approaches tracking.
 
 ---
 
-## What AGR Contributes: 9 New Ideas
+## Quick Start
 
-AGR is not a fork or a copy. It builds on Karpathy's, Goenka's, and Bria's work and introduces **9 new technical contributions** discovered through real-world experimentation:
+```bash
+# Install as Claude Code skill
+git clone https://github.com/JoaquinMulet/Artificial-General-Research.git
+cp -r Artificial-General-Research/skills/agr ~/.claude/skills/
 
-### 1. Fresh Context Per Iteration (Ralph Loop + Externalized State)
+# Setup wizard (inside Claude Code)
+/agr speed                    # optimize for speed
+/agr accuracy                 # optimize for accuracy
+/agr "bundle size"            # optimize for bundle size
 
-**Problem**: Existing implementations run in one long conversation. By experiment 50+, the LLM context window is heavily compressed and the agent makes worse optimization decisions.
-
-**Our solution**: Each iteration is a **disposable Claude Code instance** (`claude -p`). The agent reads ALL state from files, does ONE experiment, logs everything, and exits. The loop script (`run_agr.sh`) restarts it with a clean context.
-
-**Key insight**: All state must be externalized to files — `results.tsv` (history), `STRATEGY.md` (brain), `git log` (code evolution), `baseline_checksums.json` (correctness). Nothing lives in the context window. This means iteration 100 has **identical reasoning quality** to iteration 1.
-
-```
-Iteration 1:   [fresh context] → reads files → optimizes → logs → DIES
-Iteration 100: [fresh context] → reads files → optimizes → logs → DIES
-                  ↑ Same quality, same speed, no degradation
+# Launch the autonomous loop
+bash run_agr.sh --max 10      # 10 experiments to start
 ```
 
-### 2. Per-Benchmark Variance Analysis
-
-**Problem**: We discovered that our dominant benchmark (`adaptive_esi`, 82% of total time) had **±1s measurement variance**. This noise masked a real 120ms improvement in `esi_idw_3d`. We incorrectly discarded 4 experiments that had genuine improvements.
-
-**Our solution**: Instead of only checking `total_time < previous_best`, AGR evaluates each sub-benchmark independently:
-
-- A benchmark "improved" only if it exceeds its measured noise band (>5% or >2 sigma)
-- A benchmark "regressed" only if it worsened beyond its noise band
-- KEEP if ANY benchmark genuinely improved without others genuinely regressing
-
-**Why this matters**: Without this, a noisy dominant benchmark acts as a random gate that discards real improvements ~50% of the time. With per-benchmark analysis, signal is separated from noise.
-
-### 3. Measurement Artifact Detection
-
-**Problem**: After discarding 4 experiments, we noticed ALL of them showed the same "improvement" in `esi_idw_3d` (1.56s → ~1.44s). Was this real?
-
-**Our solution**: If ALL experiments (including discards) show the same improvement in a benchmark, it's not an optimization — it's a **measurement artifact** (the baseline was an outlier). AGR detects this pattern and flags the baseline for re-measurement instead of crediting non-existent improvements.
-
-### 4. Metric + Guard Separation with Rework Protocol
-
-**Problem**: Traditional autoresearch treats the optimization metric and correctness as one combined check. If a change is faster but breaks tests, it's discarded entirely — losing a potentially good optimization idea.
-
-**Our solution** (inspired by Goenka's Guard concept, extended with rework):
-- **Metric**: the number being optimized (e.g., execution time)
-- **Guard**: a pass/fail correctness check (e.g., checksums, tests)
-- If Metric improved but Guard failed: **REWORK** — fix the implementation (not the approach), max 2 attempts
-- If still failing after 2 reworks: discard
-
-This saves good optimization ideas that simply have implementation bugs.
-
-### 5. STRATEGY.md as Persistent Agent Brain
-
-**Problem**: In a fresh-context-per-iteration system, the agent has no memory of WHY previous experiments succeeded or failed. It might repeat the same failed approach.
-
-**Our solution**: `STRATEGY.md` is a structured document the agent reads first and updates last. It contains:
-
-- **Current State**: best metric value, iteration count
-- **Bottleneck Analysis**: per-benchmark breakdown with priorities
-- **Ideas to Try**: prioritized list with expected impact
-- **Ideas Already Tried**: what was tried, result, and **WHY** it worked or failed
-- **Exhausted Approaches**: entire categories marked as "don't retry"
-- **Key Insights**: accumulated knowledge about the codebase
-
-The WHY is critical. Not just "compiler flags failed" but "compiler flags failed because `exp2f`/`log2f` are scalar CRT functions that can't auto-vectorize, and AVX2 causes frequency throttling on mixed workloads."
-
-### 6. Exhausted Approaches Registry
-
-**Problem**: After 4 failed compiler flag experiments (`/fp:fast`, `/arch:AVX2`, etc.), the agent kept trying new compiler flags.
-
-**Our solution**: When a CATEGORY of approaches is depleted, it's added to "Exhausted Approaches" in STRATEGY.md with an explicit instruction not to retry:
-
-```markdown
-## Exhausted Approaches (don't retry)
-- **Compiler flags**: 4 experiments failed. MSVC optimization is maxed.
-- **LOO2D::eval micro-optimizations**: 3 experiments failed. Per-eval cost is near-optimal.
-- **Leaf-level parallelism**: load balancing already adequate with tree-level scheduling.
-```
-
-Future iterations read this and skip entire categories, focusing on unexplored approaches.
-
-### 7. Stuck Detection Protocol
-
-**Problem**: After multiple consecutive discards, the agent tends to make increasingly minor variations of the same failed approach.
-
-**Our solution**: When >5 consecutive discards are detected in `results.tsv`:
-
-1. Re-read ALL source files (not just the hot path)
-2. Review the entire results log for patterns (what categories work? what don't?)
-3. Try **combining** 2-3 previous successful optimizations in a new way
-4. Try the **opposite** approach of recent failures
-5. Try a **radical architectural change** (different algorithm, not micro-opt)
-
-### 8. Complexity Budget (Divide Large Changes)
-
-**Problem**: With more turns available (100-200), the agent sometimes attempts massive refactors that span multiple files, exceed the turn limit, and produce incomplete changes.
-
-**Our solution**: A "complexity budget" rule in `program.md`:
-
-> If a change requires more than ~30 tool calls to implement, it's TOO BIG for one iteration. Break it into smaller steps:
-> - Step 1: refactor to expose the optimization opportunity (keep if code is simpler)
-> - Step 2: apply the optimization on the clean refactored code
-> - Each step is a separate iteration with its own keep/discard decision
-
-This leverages the **simplicity criterion** — a refactoring-only step that produces simpler code is kept even without performance improvement.
-
-### 9. Supervisor Pattern with Discard Auditing
-
-**Problem**: The autonomous agent discards experiments based on total metric. But a supervisor reviewing the data can spot improvements the agent missed.
-
-**Our solution**: A supervisor (human or parent Claude Code session) periodically:
-
-- Reads `results.tsv` to see all experiments including discards
-- Audits discarded experiments for **hidden per-benchmark improvements**
-- Checks if multiple discards share a common improvement (suggesting the baseline is the outlier)
-- Adjusts `STRATEGY.md` between batches based on findings
-- Views `progress.png` for visual pattern recognition
-
-In our case study, the supervisor audit revealed that 4 discarded experiments all improved `esi_idw_3d` by ~7% — flagging a baseline measurement outlier that the autonomous agent couldn't detect on its own.
+That's it. AGR generates all needed files (`benchmark.py`, `STRATEGY.md`, `program.md`, etc.), establishes a baseline, and starts experimenting autonomously.
 
 ---
 
-## Case Study: Spatialize Library Optimization
+## Why AGR?
+
+AGR is a [Claude Code](https://claude.com/claude-code) skill that turns any measurable optimization problem into an autonomous research loop. It builds on [Karpathy's autoresearch](https://github.com/karpathy/autoresearch), [Goenka's Guard/Metric separation](https://github.com/uditgoenka/autoresearch), and [Bria's Ralph Loop](https://github.com/frankbria/ralph-claude-code) — and adds **9 new ideas** discovered through real-world experimentation:
+
+| What AGR Adds | Why It Matters |
+|---|---|
+| **Fresh context per iteration** | Iteration 100 reasons as well as iteration 1 — no context degradation |
+| **Per-benchmark variance analysis** | Noisy benchmarks don't mask real improvements in other components |
+| **Measurement artifact detection** | Catches when "improvements" are actually baseline outliers |
+| **Metric + Guard + Rework** | Good ideas with implementation bugs get fixed, not thrown away |
+| **STRATEGY.md persistent brain** | The agent remembers WHY things failed, not just that they did |
+| **Exhausted Approaches registry** | Entire failed categories get blocked — no more retrying compiler flags 4 times |
+| **Stuck detection protocol** | After 5 discards: try opposites, combine successes, go radical |
+| **Complexity budget** | Large changes get split into keep/discard-able steps across iterations |
+| **Supervisor pattern** | Human or parent agent audits discards for hidden per-benchmark wins |
+
+---
+
+## Works For Any Measurable Problem
+
+| Use Case | Metric | Guard |
+|---|---|---|
+| **Library speed** | Wall-clock time | Checksums match |
+| **Bundle size** | KB after build | Tests pass |
+| **ML accuracy** | F1 score | Min threshold met |
+| **API latency** | p95 response time | Integration tests pass |
+| **Lighthouse score** | Performance score | No visual regression |
+| **SQL optimization** | Query execution time | Same result set |
+| **Prompt engineering** | Eval score | Golden set matches |
+| **Cloud costs** | $/month | Functionality tests pass |
+| **Docker image size** | MB after build | Container health check passes |
+| **Code coverage** | % coverage | No test regressions |
+
+---
+
+## Case Study: 45x Speedup on Spatialize
 
 Full case study on a real C++/Python spatial analysis library ([spatialize](https://github.com/alges/spatialize)) — 18 autonomous experiments over one session.
 
@@ -286,33 +215,124 @@ claude -p "$(cat program.md)" \
 
 ---
 
-## Installation
+## The 9 Technical Contributions (Deep Dive)
 
-```bash
-# Clone and install as Claude Code skill
-git clone https://github.com/JoaquinMulet/Artificial-General-Research.git
-cp -r Artificial-General-Research/skills/agr ~/.claude/skills/
+AGR is not a fork or a copy. It builds on Karpathy's, Goenka's, and Bria's work and introduces **9 new technical contributions** discovered through real-world experimentation:
 
-# Or project-specific
-cp -r Artificial-General-Research/skills/agr .claude/skills/
+### 1. Fresh Context Per Iteration (Ralph Loop + Externalized State)
+
+**Problem**: Existing implementations run in one long conversation. By experiment 50+, the LLM context window is heavily compressed and the agent makes worse optimization decisions.
+
+**Our solution**: Each iteration is a **disposable Claude Code instance** (`claude -p`). The agent reads ALL state from files, does ONE experiment, logs everything, and exits. The loop script (`run_agr.sh`) restarts it with a clean context.
+
+**Key insight**: All state must be externalized to files — `results.tsv` (history), `STRATEGY.md` (brain), `git log` (code evolution), `baseline_checksums.json` (correctness). Nothing lives in the context window. This means iteration 100 has **identical reasoning quality** to iteration 1.
+
+```
+Iteration 1:   [fresh context] → reads files → optimizes → logs → DIES
+Iteration 100: [fresh context] → reads files → optimizes → logs → DIES
+                  ↑ Same quality, same speed, no degradation
 ```
 
-## Usage
+### 2. Per-Benchmark Variance Analysis
 
-```bash
-# Setup wizard (in Claude Code)
-/agr speed
-/agr accuracy
-/agr "bundle size"
+**Problem**: We discovered that our dominant benchmark (`adaptive_esi`, 82% of total time) had **±1s measurement variance**. This noise masked a real 120ms improvement in `esi_idw_3d`. We incorrectly discarded 4 experiments that had genuine improvements.
 
-# Launch optimization loop
-bash run_agr.sh --max 10
+**Our solution**: Instead of only checking `total_time < previous_best`, AGR evaluates each sub-benchmark independently:
 
-# Monitor progress
-cat results.tsv          # experiment history
-cat STRATEGY.md          # agent's current thinking
-open progress.png        # visual timeline
+- A benchmark "improved" only if it exceeds its measured noise band (>5% or >2 sigma)
+- A benchmark "regressed" only if it worsened beyond its noise band
+- KEEP if ANY benchmark genuinely improved without others genuinely regressing
+
+**Why this matters**: Without this, a noisy dominant benchmark acts as a random gate that discards real improvements ~50% of the time. With per-benchmark analysis, signal is separated from noise.
+
+### 3. Measurement Artifact Detection
+
+**Problem**: After discarding 4 experiments, we noticed ALL of them showed the same "improvement" in `esi_idw_3d` (1.56s → ~1.44s). Was this real?
+
+**Our solution**: If ALL experiments (including discards) show the same improvement in a benchmark, it's not an optimization — it's a **measurement artifact** (the baseline was an outlier). AGR detects this pattern and flags the baseline for re-measurement instead of crediting non-existent improvements.
+
+### 4. Metric + Guard Separation with Rework Protocol
+
+**Problem**: Traditional autoresearch treats the optimization metric and correctness as one combined check. If a change is faster but breaks tests, it's discarded entirely — losing a potentially good optimization idea.
+
+**Our solution** (inspired by Goenka's Guard concept, extended with rework):
+- **Metric**: the number being optimized (e.g., execution time)
+- **Guard**: a pass/fail correctness check (e.g., checksums, tests)
+- If Metric improved but Guard failed: **REWORK** — fix the implementation (not the approach), max 2 attempts
+- If still failing after 2 reworks: discard
+
+This saves good optimization ideas that simply have implementation bugs.
+
+### 5. STRATEGY.md as Persistent Agent Brain
+
+**Problem**: In a fresh-context-per-iteration system, the agent has no memory of WHY previous experiments succeeded or failed. It might repeat the same failed approach.
+
+**Our solution**: `STRATEGY.md` is a structured document the agent reads first and updates last. It contains:
+
+- **Current State**: best metric value, iteration count
+- **Bottleneck Analysis**: per-benchmark breakdown with priorities
+- **Ideas to Try**: prioritized list with expected impact
+- **Ideas Already Tried**: what was tried, result, and **WHY** it worked or failed
+- **Exhausted Approaches**: entire categories marked as "don't retry"
+- **Key Insights**: accumulated knowledge about the codebase
+
+The WHY is critical. Not just "compiler flags failed" but "compiler flags failed because `exp2f`/`log2f` are scalar CRT functions that can't auto-vectorize, and AVX2 causes frequency throttling on mixed workloads."
+
+### 6. Exhausted Approaches Registry
+
+**Problem**: After 4 failed compiler flag experiments (`/fp:fast`, `/arch:AVX2`, etc.), the agent kept trying new compiler flags.
+
+**Our solution**: When a CATEGORY of approaches is depleted, it's added to "Exhausted Approaches" in STRATEGY.md with an explicit instruction not to retry:
+
+```markdown
+## Exhausted Approaches (don't retry)
+- **Compiler flags**: 4 experiments failed. MSVC optimization is maxed.
+- **LOO2D::eval micro-optimizations**: 3 experiments failed. Per-eval cost is near-optimal.
+- **Leaf-level parallelism**: load balancing already adequate with tree-level scheduling.
 ```
+
+Future iterations read this and skip entire categories, focusing on unexplored approaches.
+
+### 7. Stuck Detection Protocol
+
+**Problem**: After multiple consecutive discards, the agent tends to make increasingly minor variations of the same failed approach.
+
+**Our solution**: When >5 consecutive discards are detected in `results.tsv`:
+
+1. Re-read ALL source files (not just the hot path)
+2. Review the entire results log for patterns (what categories work? what don't?)
+3. Try **combining** 2-3 previous successful optimizations in a new way
+4. Try the **opposite** approach of recent failures
+5. Try a **radical architectural change** (different algorithm, not micro-opt)
+
+### 8. Complexity Budget (Divide Large Changes)
+
+**Problem**: With more turns available (100-200), the agent sometimes attempts massive refactors that span multiple files, exceed the turn limit, and produce incomplete changes.
+
+**Our solution**: A "complexity budget" rule in `program.md`:
+
+> If a change requires more than ~30 tool calls to implement, it's TOO BIG for one iteration. Break it into smaller steps:
+> - Step 1: refactor to expose the optimization opportunity (keep if code is simpler)
+> - Step 2: apply the optimization on the clean refactored code
+> - Each step is a separate iteration with its own keep/discard decision
+
+This leverages the **simplicity criterion** — a refactoring-only step that produces simpler code is kept even without performance improvement.
+
+### 9. Supervisor Pattern with Discard Auditing
+
+**Problem**: The autonomous agent discards experiments based on total metric. But a supervisor reviewing the data can spot improvements the agent missed.
+
+**Our solution**: A supervisor (human or parent Claude Code session) periodically:
+
+- Reads `results.tsv` to see all experiments including discards
+- Audits discarded experiments for **hidden per-benchmark improvements**
+- Checks if multiple discards share a common improvement (suggesting the baseline is the outlier)
+- Adjusts `STRATEGY.md` between batches based on findings
+- Views `progress.png` for visual pattern recognition
+
+In our case study, the supervisor audit revealed that 4 discarded experiments all improved `esi_idw_3d` by ~7% — flagging a baseline measurement outlier that the autonomous agent couldn't detect on its own.
+
+---
 
 ## Generated Files
 
@@ -326,21 +346,6 @@ open progress.png        # visual timeline
 | `analysis.py` | Generates progress.png | **Never** |
 | `run_agr.sh` | Loop launcher | **Never** |
 | `progress.png` | Optimization timeline chart | Auto-generated |
-
-## Works For Any Measurable Problem
-
-| Use Case | Metric | Guard |
-|---|---|---|
-| **Library speed** | Wall-clock time | Checksums match |
-| **Bundle size** | KB after build | Tests pass |
-| **ML accuracy** | F1 score | Min threshold met |
-| **API latency** | p95 response time | Integration tests pass |
-| **Lighthouse score** | Performance score | No visual regression |
-| **SQL optimization** | Query execution time | Same result set |
-| **Prompt engineering** | Eval score | Golden set matches |
-| **Cloud costs** | $/month | Functionality tests pass |
-| **Docker image size** | MB after build | Container health check passes |
-| **Code coverage** | % coverage | No test regressions |
 
 ---
 
@@ -362,6 +367,12 @@ open progress.png        # visual timeline
 | Strategy persistence | None | None | None | **STRATEGY.md with WHY tracking** |
 
 ---
+
+## Inspired By
+
+- **[Andrej Karpathy's autoresearch](https://github.com/karpathy/autoresearch)** — the original vision of autonomous AI research. 630 lines of Python, 100 experiments per night, compounding gains. Thank you Andrej for everything you do for open source and the AI community.
+- **[Udit Goenka's autoresearch](https://github.com/uditgoenka/autoresearch)** — generalized autoresearch beyond ML, introduced Metric/Guard separation.
+- **[Frank Bria's Ralph Loop](https://github.com/frankbria/ralph-claude-code)** — the stop-hook pattern for fresh context per iteration in Claude Code.
 
 ## Contributing
 

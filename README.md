@@ -31,6 +31,8 @@ bash run_agr.sh --max 10      # 10 experiments to start
 
 That's it. AGR generates all needed files (`benchmark.py`, `STRATEGY.md`, `program.md`, etc.), establishes a baseline, and starts experimenting autonomously.
 
+**Want it containerized?** The repo ships a Docker stack — `agloop` (iteration loop + agent), `agwatch` (heartbeat watchdog + auto-cleanup), `agdash` (:8080 dashboard) — with one-contract metric parsing (`key: float`), same-window references, quiet windows, dry-run validation and an `examples/synthetic-campaign/` no-LLM quickstart. See [`docker/`](docker/).
+
 ---
 
 ## Why AGR?
@@ -395,3 +397,4 @@ Standing on the shoulders of:
 - [Andrej Karpathy](https://github.com/karpathy/autoresearch) — the original autoresearch vision
 - [Udit Goenka](https://github.com/uditgoenka/autoresearch) — generalized autoresearch to non-ML tasks, Metric/Guard separation
 - [Frank Bria](https://github.com/frankbria/ralph-claude-code) — the Ralph Loop pattern for Claude Code (fresh context per iteration via stop-hook re-invocation)
+
